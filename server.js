@@ -1,7 +1,6 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const fetch = require('node-fetch');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -9,26 +8,38 @@ const API_KEY = process.env.API_KEY || 'ff-buff-2024'; // ⚠️ đổi trên Re
 
 const ACC_PATH = path.join(__dirname, 'acc.json');
 
-function loadAcc() { return JSON.parse(fs.readFileSync(ACC_PATH, 'utf8')); }
-function saveAcc(o) { fs.writeFileSync(ACC_PATH, JSON.stringify(o, null, 2)); }
+function loadAcc() {
+  return JSON.parse(fs.readFileSync(ACC_PATH, 'utf8'));
+}
+function saveAcc(o) {
+  fs.writeFileSync(ACC_PATH, JSON.stringify(o, null, 2));
+}
 
 let cursor = 0;
 
 // ---------- Auth middleware ----------
 function auth(req, res, next) {
   const key = req.query.key || req.headers['x-api-key'];
-  if (key !== API_KEY) return res.status(401).json({ error: 'Unauthorized: sai key' });
+  if (key !== API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized: sai key' });
+  }
   next();
 }
 
 // ---------- Utils ----------
 function randomIp() {
-  return [1,2,3,4].map(() => Math.floor(Math.random()*254)+1).join('.');
+  return [1, 2, 3, 4].map(() => Math.floor(Math.random() * 254) + 1).join('.');
 }
 
 async function sendLike(targetUid, region, token) {
   const url = 'https://ff.garena.com/api/antispam/like';
-  const body = new URLSearchParams({ uid: targetUid, region, token, language: 'vi' });
+  const body = new URLSearchParams({
+    uid: targetUid,
+    region: region,
+    token: token,
+    language: 'vi'
+  });
+
   const resp = await fetch(url, {
     method: 'POST',
     headers: {
@@ -42,9 +53,12 @@ async function sendLike(targetUid, region, token) {
     },
     body
   });
+
   const text = await resp.text();
   let json = null;
-  try { json = JSON.parse(text); } catch(_) {}
+  try {
+    json = JSON.parse(text);
+  } catch (_) {}
   return { http: resp.status, ok: resp.ok, data: json ?? text };
 }
 
@@ -57,7 +71,9 @@ async function checkToken(token, region = 'vn') {
       if (d === 1) return { status: 'alive', note: 'đã like rồi' };
       return { status: 'alive', note: 'phản hồi: ' + JSON.stringify(r.data) };
     }
-    if (r.http === 401 || r.http === 403) return { status: 'dead', note: 'token hết hạn' };
+    if (r.http === 401 || r.http === 403) {
+      return { status: 'dead', note: 'token hết hạn' };
+    }
     return { status: 'unknown', note: 'http ' + r.http };
   } catch (e) {
     return { status: 'error', note: e.message };
@@ -70,13 +86,13 @@ app.get('/', (req, res) => {
     status: 'ok',
     service: 'FF Like Buff API',
     endpoints: {
-      likes:      '/api/likes?uid=<UID>&region=vn&count=10&key=<KEY>',
-      likesAll:   '/api/likes-all?uid=<UID>&region=vn&key=<KEY>',
-      accounts:   '/api/accounts?key=<KEY>',
-      add:        '/api/add?uid=<UID>&token=<TOKEN>&key=<KEY>',
-      delete:     '/api/delete?uid=<UID>&key=<KEY>',
-      check:      '/api/check?uid=<UID>&key=<KEY>',
-      checkAll:   '/api/check-all?key=<KEY>'
+      likes: '/api/likes?uid=<UID>&region=vn&count=10&key=<KEY>',
+      likesAll: '/api/likes-all?uid=<UID>&region=vn&key=<KEY>',
+      accounts: '/api/accounts?key=<KEY>',
+      add: '/api/add?uid=<UID>&token=<TOKEN>&key=<KEY>',
+      delete: '/api/delete?uid=<UID>&key=<KEY>',
+      check: '/api/check?uid=<UID>&key=<KEY>',
+      checkAll: '/api/check-all?key=<KEY>'
     }
   });
 });
@@ -87,8 +103,10 @@ app.get('/api/likes', auth, async (req, res) => {
   let count = parseInt(req.query.count || '1', 10);
   if (!uid) return res.status(400).json({ error: 'Thiếu ?uid=' });
 
-  const accs = Object.entries(loadAcc()).map(([u,t]) => ({ uid: u, token: t }));
-  if (!accs.length) return res.json({ target: uid, success: 0, failed: 0, results: [] });
+  const accs = Object.entries(loadAcc()).map(([u, t]) => ({ uid: u, token: t }));
+  if (!accs.length) {
+    return res.json({ target: uid, success: 0, failed: 0, results: [] });
+  }
   if (isNaN(count) || count < 1) count = 1;
   count = Math.min(count, accs.length);
 
@@ -102,8 +120,19 @@ app.get('/api/likes', auth, async (req, res) => {
       results.push({ account: acc.uid, error: e.message });
     }
   }
-  const success = results.filter(r => r.ok && r.data && r.data.data === 0).length;
-  res.json({ target: uid, region, requested: count, success, failed: count - success, results });
+
+  const success = results.filter(
+    (r) => r.ok && r.data && r.data.data === 0
+  ).length;
+
+  res.json({
+    target: uid,
+    region,
+    requested: count,
+    success,
+    failed: count - success,
+    results
+  });
 });
 
 // Buff toàn bộ
@@ -111,7 +140,7 @@ app.get('/api/likes-all', auth, async (req, res) => {
   const { uid, region = 'vn' } = req.query;
   if (!uid) return res.status(400).json({ error: 'Thiếu ?uid=' });
 
-  const accs = Object.entries(loadAcc()).map(([u,t]) => ({ uid: u, token: t }));
+  const accs = Object.entries(loadAcc()).map(([u, t]) => ({ uid: u, token: t }));
   const results = [];
   for (const acc of accs) {
     try {
@@ -121,8 +150,19 @@ app.get('/api/likes-all', auth, async (req, res) => {
       results.push({ account: acc.uid, error: e.message });
     }
   }
-  const success = results.filter(r => r.ok && r.data && r.data.data === 0).length;
-  res.json({ target: uid, region, total: accs.length, success, failed: accs.length - success, results });
+
+  const success = results.filter(
+    (r) => r.ok && r.data && r.data.data === 0
+  ).length;
+
+  res.json({
+    target: uid,
+    region,
+    total: accs.length,
+    success,
+    failed: accs.length - success,
+    results
+  });
 });
 
 // Danh sách account
@@ -130,7 +170,10 @@ app.get('/api/accounts', auth, (req, res) => {
   const acc = loadAcc();
   const list = Object.entries(acc).map(([uid, token]) => ({
     uid,
-    token_preview: token.length > 20 ? token.slice(0, 12) + '...' + token.slice(-6) : token
+    token_preview:
+      token.length > 20
+        ? token.slice(0, 12) + '...' + token.slice(-6)
+        : token
   }));
   res.json({ total: list.length, accounts: list });
 });
@@ -138,9 +181,13 @@ app.get('/api/accounts', auth, (req, res) => {
 // Thêm account
 app.get('/api/add', auth, (req, res) => {
   const { uid, token } = req.query;
-  if (!uid || !token) return res.status(400).json({ error: 'Thiếu ?uid= hoặc ?token=' });
+  if (!uid || !token) {
+    return res.status(400).json({ error: 'Thiếu ?uid= hoặc ?token=' });
+  }
   const acc = loadAcc();
-  if (acc[uid]) return res.json({ status: 'exists', uid, message: 'UID đã tồn tại' });
+  if (acc[uid]) {
+    return res.json({ status: 'exists', uid, message: 'UID đã tồn tại' });
+  }
   acc[uid] = token;
   saveAcc(acc);
   res.json({ status: 'added', uid, total: Object.keys(acc).length });
@@ -177,9 +224,15 @@ app.get('/api/check-all', auth, async (req, res) => {
     const r = await checkToken(token, region);
     results.push({ uid, ...r });
   }
-  const alive = results.filter(r => r.status === 'alive').length;
-  const dead  = results.filter(r => r.status === 'dead').length;
-  res.json({ total: entries.length, alive, dead, other: entries.length - alive - dead, results });
+  const alive = results.filter((r) => r.status === 'alive').length;
+  const dead = results.filter((r) => r.status === 'dead').length;
+  res.json({
+    total: entries.length,
+    alive,
+    dead,
+    other: entries.length - alive - dead,
+    results
+  });
 });
 
 app.listen(PORT, () => {
