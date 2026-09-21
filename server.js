@@ -4,15 +4,30 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.API_KEY || 'ff-buff-2024'; // ⚠️ đổi trên Render
+const API_KEY = process.env.API_KEY || 'ff-buff-2024';
 
 const ACC_PATH = path.join(__dirname, 'acc.json');
 
+// ---------- Load / Save acc.json an toàn ----------
 function loadAcc() {
-  return JSON.parse(fs.readFileSync(ACC_PATH, 'utf8'));
+  try {
+    if (!fs.existsSync(ACC_PATH)) {
+      fs.writeFileSync(ACC_PATH, '{}');
+      return {};
+    }
+    return JSON.parse(fs.readFileSync(ACC_PATH, 'utf8'));
+  } catch (e) {
+    console.error('Lỗi đọc acc.json:', e.message);
+    return {};
+  }
 }
+
 function saveAcc(o) {
-  fs.writeFileSync(ACC_PATH, JSON.stringify(o, null, 2));
+  try {
+    fs.writeFileSync(ACC_PATH, JSON.stringify(o, null, 2));
+  } catch (e) {
+    console.error('Lỗi ghi acc.json:', e.message);
+  }
 }
 
 let cursor = 0;
@@ -31,8 +46,53 @@ function randomIp() {
   return [1, 2, 3, 4].map(() => Math.floor(Math.random() * 254) + 1).join('.');
 }
 
+// ---------- Cookie store (cache 5 phút / region) ----------
+const cookieCache = {};
+
+async function getGarenaCookies(region) {
+  const cached = cookieCache[region];
+  if (cached && Date.now() - cached.time < 5 * 60 * 1000 && cached.data) {
+    return cached.data;
+  }
+  try {
+    const r = await fetch(`https://ff.garena.com/${region}/`, {
+      method: 'GET',
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+        'Accept':
+          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+        'X-Forwarded-For': randomIp()
+      },
+      redirect: 'follow'
+    });
+
+    let cookies = [];
+    if (typeof r.headers.getSetCookie === 'function') {
+      cookies = r.headers.getSetCookie();
+    } else {
+      const sc = r.headers.get('set-cookie');
+      if (sc) cookies = [sc];
+    }
+
+    const cookie = cookies
+      .map((c) => c.split(';')[0])
+      .filter(Boolean)
+      .join('; ');
+
+    cookieCache[region] = { data: cookie, time: Date.now() };
+    return cookie;
+  } catch (e) {
+    return '';
+  }
+}
+
+// ---------- Send like ----------
 async function sendLike(targetUid, region, token) {
   const url = 'https://ff.garena.com/api/antispam/like';
+  const cookie = await getGarenaCookies(region);
+
   const body = new URLSearchParams({
     uid: targetUid,
     region: region,
@@ -40,17 +100,28 @@ async function sendLike(targetUid, region, token) {
     language: 'vi'
   });
 
+  const headers = {
+    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    'User-Agent':
+      'Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+    'Referer': `https://ff.garena.com/${region}/`,
+    'Origin': 'https://ff.garena.com',
+    'X-Requested-With': 'XMLHttpRequest',
+    'sec-ch-ua': '"Chromium";v="120", "Android WebView";v="120"',
+    'sec-ch-ua-mobile': '?1',
+    'sec-ch-ua-platform': '"Android"',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-origin',
+    'X-Forwarded-For': randomIp()
+  };
+  if (cookie) headers['Cookie'] = cookie;
+
   const resp = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      'User-Agent':
-        'Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36',
-      'Referer': `https://ff.garena.com/${region}/`,
-      'Origin': 'https://ff.garena.com',
-      'X-Forwarded-For': randomIp(),
-      'Accept': 'application/json, text/plain, */*'
-    },
+    headers,
     body
   });
 
@@ -59,9 +130,23 @@ async function sendLike(targetUid, region, token) {
   try {
     json = JSON.parse(text);
   } catch (_) {}
+
+  // Garena trả về HTML (Cloudflare / block)
+  if (!json && text && text.trim().toLowerCase().startsWith('<!doctype')) {
+    return {
+      http: resp.status,
+      ok: false,
+      data: {
+        error: 'Garena trả HTML (bị chặn / Cloudflare)',
+        status: resp.status
+      }
+    };
+  }
+
   return { http: resp.status, ok: resp.ok, data: json ?? text };
 }
 
+// ---------- Check token ----------
 async function checkToken(token, region = 'vn') {
   try {
     const r = await sendLike('1234567890', region, token);
