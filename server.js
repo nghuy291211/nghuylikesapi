@@ -159,6 +159,9 @@ async function checkToken(token, region = 'vn') {
     if (r.http === 401 || r.http === 403) {
       return { status: 'dead', note: 'token hết hạn' };
     }
+    if (r.http === 404) {
+      return { status: 'dead', note: 'endpoint 404 (Garena đổi API)' };
+    }
     return { status: 'unknown', note: 'http ' + r.http };
   } catch (e) {
     return { status: 'error', note: e.message };
@@ -177,7 +180,8 @@ app.get('/', (req, res) => {
       add: '/api/add?uid=<UID>&token=<TOKEN>&key=<KEY>',
       delete: '/api/delete?uid=<UID>&key=<KEY>',
       check: '/api/check?uid=<UID>&key=<KEY>',
-      checkAll: '/api/check-all?key=<KEY>'
+      checkAll: '/api/check-all?key=<KEY>',
+      diagnose: '/api/diagnose?uid=<UID>&region=vn&token=<TOKEN>&key=<KEY>'
     }
   });
 });
@@ -316,6 +320,63 @@ app.get('/api/check-all', auth, async (req, res) => {
     alive,
     dead,
     other: entries.length - alive - dead,
+    results
+  });
+});
+
+// ---------- Diagnose: xem raw response từ Garena ----------
+app.get('/api/diagnose', auth, async (req, res) => {
+  const { uid = '1234567890', region = 'vn', token = '' } = req.query;
+  if (!token) return res.status(400).json({ error: 'Thiếu ?token=' });
+
+  const endpoints = [
+    'https://ff.garena.com/api/antispam/like',
+    'https://ff.garena.com/api/antispam/likes',
+    'https://ff.garena.com/api/like'
+  ];
+
+  const cookie = await getGarenaCookies(region);
+  const results = [];
+
+  for (const url of endpoints) {
+    try {
+      const body = new URLSearchParams({
+        uid,
+        region,
+        token,
+        language: 'vi'
+      });
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type':
+            'application/x-www-form-urlencoded; charset=UTF-8',
+          'User-Agent':
+            'Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Referer': `https://ff.garena.com/${region}/`,
+          'Origin': 'https://ff.garena.com',
+          'Cookie': cookie,
+          'X-Forwarded-For': randomIp()
+        },
+        body
+      });
+      const text = await r.text();
+      results.push({
+        url,
+        http: r.status,
+        headers: Object.fromEntries(r.headers.entries()),
+        body_preview: text.slice(0, 500)
+      });
+    } catch (e) {
+      results.push({ url, error: e.message });
+    }
+  }
+
+  res.json({
+    note: 'Gửi kết quả này cho dev để chẩn đoán',
+    cookie_obtained: cookie ? 'yes (' + cookie.length + ' chars)' : 'no',
+    cookie_preview: cookie.slice(0, 120),
     results
   });
 });
