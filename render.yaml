@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: ff-buff-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "18"
+      - key: API_KEY
+        sync: false          # nhập trong Dashboard → Environment
